@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Far House Walk</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000;
+        }
+
+        #game {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            pointer-events: none;
+        }
+
+        #crt {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            background:
+                repeating-linear-gradient(0deg,
+                    rgba(0, 0, 0, 0.18) 0px,
+                    rgba(0, 0, 0, 0.18) 1px,
+                    transparent 1px,
+                    transparent 3px);
+            mix-blend-mode: multiply;
+        }
+
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.92);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            cursor: pointer;
+            z-index: 10;
+            padding-left: 50px;
+        }
+
+        #homescreen {
+            text-align: left;
+        }
+
+        #homescreen h1 {
+            font-family: 'Courier New', monospace;
+            font-size: 36px;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: #fff;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+
+        #homescreen button,
+        #homescreen a {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: #fff;
+            background: none;
+            border: 2px solid #fff;
+            padding: 10px 20px;
+            margin-right: 20px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+
+        #homescreen button:hover,
+        #homescreen a:hover {
+            opacity: 1;
+        }
+
+        #faceCanvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            display: none;
+            z-index: 49;
+        }
+
+        #win {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 1);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        #win.active {
+            display: flex;
+        }
+
+        #win p {
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            opacity: 0.5;
+        }
+
+        #dot {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.75);
+            pointer-events: none;
+            z-index: 7;
+        }
+
+        #vignette {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 6;
+            background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0) 100%);
+            transition: background 0.3s;
+        }
+
+        #static {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 8;
+            opacity: 0;
+            transition: opacity 0.1s;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="game"></canvas>
+    <div id="crt"></div>
+    <div id="vignette"></div>
+    <div id="dot"></div>
+    <canvas id="static"></canvas>
+    <canvas id="faceCanvas"></canvas>
+    <div id="overlay">
+        <div id="homescreen">
+            <h1>Far House Walk</h1>
+            <button id="playBtn">Play</button>
+            <button id="fullscreenBtn">Fullscreen</button>
+            <a href="https://discord.gg/74c9RBYD4R" target="_blank" id="discordBtn">Discord</a>
+        </div>
+    </div>
+    <audio id="bgm" src="audio.mp3" loop></audio>
+    <div id="win">
+        <p>You made it, now what?</p>
+    </div>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js"
+      }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+
+        const PS1_W = 320;
+        const PS1_H = 240;
+        const canvas = document.getElementById('game');
+        canvas.width = PS1_W;
+        canvas.height = PS1_H;
+
+        const ROAD_START = 6;
+        const ROAD_END = -520;
+        const ROAD_LEN = Math.abs(ROAD_END - ROAD_START);
+        const WALL_X = 10;
+        const WALL_GAP = 3;
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0xaec4d8, 60, 420);
+
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+        renderer.setPixelRatio(1);
+        renderer.setSize(PS1_W, PS1_H, false);
+        renderer.shadowMap.enabled = false;
+
+        const camera = new THREE.PerspectiveCamera(75, PS1_W / PS1_H, 0.1, 600);
+        camera.position.set(0, 1.65, 4);
+
+        const sunLight = new THREE.DirectionalLight(0xffe8c0, 1.1);
+        sunLight.position.set(30, 80, 30);
+        scene.add(sunLight);
+        scene.add(new THREE.AmbientLight(0x8899aa, 0.8));
+
+        let skyMesh, sunDisc, glowRing;
+        {
+            const SKY_R = 550;
+            const skyGeo = new THREE.SphereGeometry(SKY_R, 16, 10);
+            const topColor = new THREE.Color(0x4a78b8);
+            const horizColor = new THREE.Color(0xc8d8e8);
+            const pos = skyGeo.attributes.position;
+            const colors = [];
+            for (let i = 0; i < pos.count; i++) {
+                const y = pos.getY(i);
+                const t = Math.max(0, Math.min(1, (y + SKY_R) / (SKY_R * 1.5)));
+                const c = topColor.clone().lerp(horizColor, 1 - t);
+                colors.push(c.r, c.g, c.b);
+            }
+            skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            const skyMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide });
+            skyMesh = new THREE.Mesh(skyGeo, skyMat);
+            scene.add(skyMesh);
+
+            const sunGeo = new THREE.CircleGeometry(18, 16);
+            const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff0a0 });
+            sunDisc = new THREE.Mesh(sunGeo, sunMat);
+            sunDisc.position.set(80, 210, -300);
+            scene.add(sunDisc);
+
+            const glowGeo = new THREE.RingGeometry(18, 30, 16);
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0xffeebb, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+            glowRing = new THREE.Mesh(glowGeo, glowMat);
+            glowRing.position.copy(sunDisc.position);
+            scene.add(glowRing);
+        }
+
+        function makeNoiseTexture(w, h, baseR, baseG, baseB, spread, pixSize) {
+            const off = document.createElement('canvas');
+            off.width = w; off.height = h;
+            const ctx = off.getContext('2d');
+            const bw = Math.ceil(w / pixSize);
+            const bh = Math.ceil(h / pixSize);
+            for (let bx = 0; bx < bw; bx++) {
+                for (let by = 0; by < bh; by++) {
+                    const n = (Math.random() - 0.5) * spread;
+                    const r = Math.min(255, Math.max(0, baseR + n));
+                    const g = Math.min(255, Math.max(0, baseG + n * 1.2));
+                    const b = Math.min(255, Math.max(0, baseB + n * 0.6));
+                    ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+                    ctx.fillRect(bx * pixSize, by * pixSize, pixSize, pixSize);
+                }
+            }
+            const tex = new THREE.CanvasTexture(off);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.minFilter = tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        const grassTex = makeNoiseTexture(64, 64, 115, 152, 62, 55, 4);
+        grassTex.repeat.set(40, 300);
+
+        const asphaltTex = makeNoiseTexture(64, 64, 80, 80, 82, 22, 1);
+        asphaltTex.repeat.set(4, ROAD_LEN / 5);
+
+        const loader = new THREE.TextureLoader();
+        function ps1Tex(tex) {
+            tex.minFilter = tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        const groundGeo = new THREE.PlaneGeometry(100, ROAD_LEN + 20);
+        const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.z = (ROAD_START + ROAD_END) / 2;
+        scene.add(ground);
+
+        const roadGeo = new THREE.PlaneGeometry(5.5, ROAD_LEN);
+        const roadMat = new THREE.MeshLambertMaterial({ map: asphaltTex });
+        const road = new THREE.Mesh(roadGeo, roadMat);
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, 0.01, (ROAD_START + ROAD_END) / 2);
+        scene.add(road);
+
+        const dashMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+        for (let z = ROAD_START - 5; z > ROAD_END; z -= 12) {
+            const dg = new THREE.PlaneGeometry(0.18, 5);
+            const dm = new THREE.Mesh(dg, dashMat);
+            dm.rotation.x = -Math.PI / 2;
+            dm.position.set(0, 0.02, z);
+            scene.add(dm);
+        }
+
+        loader.load('wheats.png', tex => {
+            ps1Tex(tex);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.ClampToEdgeWrapping;
+            const WHEAT_H = 3.5;
+            const tilesAlong = Math.round(ROAD_LEN / (WHEAT_H * 2));
+            tex.repeat.set(tilesAlong, 1);
+            const wallGeo = new THREE.PlaneGeometry(ROAD_LEN, WHEAT_H);
+            const wallMat = new THREE.MeshLambertMaterial({
+                map: tex, transparent: true, alphaTest: 0.25, side: THREE.DoubleSide,
+            });
+            [-1, 1].forEach(sign => {
+                const w1 = new THREE.Mesh(wallGeo, wallMat);
+                w1.rotation.y = Math.PI / 2;
+                w1.position.set(sign * WALL_X, WHEAT_H / 2, (ROAD_START + ROAD_END) / 2);
+                scene.add(w1);
+                const w2 = new THREE.Mesh(wallGeo, wallMat);
+                w2.rotation.y = Math.PI / 2;
+                w2.position.set(sign * (WALL_X + 0.6), WHEAT_H / 2, (ROAD_START + ROAD_END) / 2);
+                scene.add(w2);
+            });
+        });
+
+        loader.load('house.png', tex => {
+            ps1Tex(tex);
+            const aspect = tex.image.width / tex.image.height;
+            const HOUSE_H = 12;
+            const houseGeo = new THREE.PlaneGeometry(HOUSE_H * aspect, HOUSE_H);
+            const houseMat = new THREE.MeshLambertMaterial({
+                map: tex, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide,
+            });
+            const house = new THREE.Mesh(houseGeo, houseMat);
+            house.position.set(0, HOUSE_H / 2, ROAD_END + 1);
+            scene.add(house);
+        });
+
+        const FIGURE_Z = (ROAD_START + ROAD_END) / 2 - 20;
+        const FIGURE_X = WALL_X + 1.2;
+
+        const raycaster = new THREE.Raycaster();
+        const screenCenter = new THREE.Vector2(0, 0);
+        let yaw = 0, pitch = 0;
+        let moveF = false, moveB = false, moveL = false, moveR = false;
+        let sprint = false;
+        let locked = false;
+
+        const overlay = document.getElementById('overlay');
+        const playBtn = document.getElementById('playBtn');
+        const vigEl = document.getElementById('vignette');
+        const winEl = document.getElementById('win');
+        const bgm = document.getElementById('bgm');
+
+        const faceImg = new Image();
+        faceImg.src = 'figureface.png';
+
+        const staticCanvas = document.getElementById('static');
+        const staticCtx = staticCanvas.getContext('2d');
+        function resizeStatic() {
+            staticCanvas.width = window.innerWidth;
+            staticCanvas.height = window.innerHeight;
+        }
+        resizeStatic();
+        window.addEventListener('resize', resizeStatic);
+
+        function drawStatic(opacity) {
+            staticCanvas.style.opacity = opacity;
+            if (opacity <= 0.01) return;
+            const W = staticCanvas.width;
+            const H = staticCanvas.height;
+            const imgData = staticCtx.createImageData(W, H);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const v = Math.random() > 0.5 ? 255 : 0;
+                data[i] = v;
+                data[i + 1] = v;
+                data[i + 2] = v;
+                data[i + 3] = (Math.random() * 180) | 0;
+            }
+            staticCtx.putImageData(imgData, 0, 0);
+        }
+
+        overlay.addEventListener('click', () => {
+            audioCtx.resume();
+            renderer.domElement.requestPointerLock();
+        });
+
+        playBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            audioCtx.resume();
+            renderer.domElement.requestPointerLock();
+        });
+
+        document.getElementById('fullscreenBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else {
+                document.documentElement.requestFullscreen();
+            }
+        });
+        
+        renderer.domElement.addEventListener('click', () => {
+            if (!locked) {
+                audioCtx.resume();
+                renderer.domElement.requestPointerLock();
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            locked = document.pointerLockElement === renderer.domElement;
+            if (locked) {
+                overlay.style.display = 'none';
+                renderer.domElement.style.cursor = 'none';
+            }
+            if (locked && bgm.paused) bgm.play().catch(() => { });
+        });
+        
+        document.addEventListener('pointerlockerror', () => {
+            console.log('pointer lock error');
+            overlay.style.display = 'flex';
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (!locked) return;
+            yaw -= e.movementX * 0.0025;
+            pitch -= e.movementY * 0.0025;
+            pitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, pitch));
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.code === 'KeyW' || e.code === 'ArrowUp') moveF = true;
+            if (e.code === 'KeyS' || e.code === 'ArrowDown') moveB = true;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') moveL = true;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') moveR = true;
+            if (e.code === 'KeyJ') sprint = true;
+            e.preventDefault();
+        });
+        document.addEventListener('keyup', e => {
+            if (e.code === 'KeyW' || e.code === 'ArrowUp') moveF = false;
+            if (e.code === 'KeyS' || e.code === 'ArrowDown') moveB = false;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') moveL = false;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') moveR = false;
+            if (e.code === 'KeyJ') sprint = false;
+        });
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playFootstep() {
+            const bufLen = audioCtx.sampleRate * 0.08;
+            const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < bufLen; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 6);
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+
+            const lp = audioCtx.createBiquadFilter();
+            lp.type = 'lowpass';
+            lp.frequency.value = 180;
+
+            src.playbackRate.value = 0.85 + Math.random() * 0.3;
+
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0.55;
+
+            src.connect(lp);
+            lp.connect(gain);
+            gain.connect(audioCtx.destination);
+            src.start();
+        }
+
+        let proximityOsc = null;
+        let proximityGain = null;
+        let proximityLfo = null;
+
+        function initProximityAudio() {
+            if (proximityOsc) return;
+
+            proximityOsc = audioCtx.createOscillator();
+            proximityOsc.type = 'sawtooth';
+            proximityOsc.frequency.value = 55;
+
+            proximityLfo = audioCtx.createOscillator();
+            proximityLfo.type = 'sine';
+            proximityLfo.frequency.value = 4;
+
+            const lfoGain = audioCtx.createGain();
+            lfoGain.gain.value = 15;
+            proximityLfo.connect(lfoGain);
+            lfoGain.connect(proximityOsc.frequency);
+
+            const lp = audioCtx.createBiquadFilter();
+            lp.type = 'lowpass';
+            lp.frequency.value = 200;
+
+            proximityGain = audioCtx.createGain();
+            proximityGain.gain.value = 0;
+
+            proximityOsc.connect(lp);
+            lp.connect(proximityGain);
+            proximityGain.connect(audioCtx.destination);
+
+            proximityOsc.start();
+            proximityLfo.start();
+        }
+
+        function updateProximityAudio(closestDist, isAnyChasing) {
+            if (!proximityOsc) initProximityAudio();
+
+            const MAX_DIST = 45;
+            const MIN_DIST = 5;
+
+            let volume = 0;
+            if (!isAnyChasing && closestDist < MAX_DIST) {
+                if (closestDist <= MIN_DIST) {
+                    volume = 0.35;
+                } else {
+                    volume = 0.35 * Math.max(0, 1 - (closestDist - MIN_DIST) / (MAX_DIST - MIN_DIST));
+                }
+            }
+
+            const currentGain = proximityGain.gain.value;
+            proximityGain.gain.value = currentGain + (volume - currentGain) * 0.08;
+        }
+
+        const BASE_Y = 1.65;
+        const BOB_FREQ = 2.2;
+        const BOB_AMOUNT = 0.055;
+        const BOB_SWAY = 0.022;
+        let bobTime = 0;
+        let lastStepSide = 0;
+        const SPEED = 6;
+        const clock = new THREE.Clock();
+        const dir = new THREE.Vector3();
+        let won = false;
+
+        let figures = [];
+        const GAZE_TRIGGER = 3.0;
+
+        loader.load('figure.png', tex => {
+            ps1Tex(tex);
+            const aspect = tex.image.width / tex.image.height;
+            const FIG_H = 4.5;
+            const figGeo = new THREE.PlaneGeometry(FIG_H * aspect, FIG_H);
+            const figMat = new THREE.MeshLambertMaterial({
+                map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide,
+            });
+            const figureMesh = new THREE.Mesh(figGeo, figMat);
+            figureMesh.position.set(FIGURE_X, FIG_H / 2, FIGURE_Z);
+            scene.add(figureMesh);
+            figures.push({
+                mesh: figureMesh,
+                active: false,
+                triggered: false,
+                gazeTicks: 0
+            });
+        });
+
+        function loop() {
+            requestAnimationFrame(loop);
+            const dt = Math.min(clock.getDelta(), 0.05);
+
+            const anyTriggered = figures.some(f => f.triggered);
+            const anyChasing = figures.some(f => f.active && !f.triggered);
+
+            const isMoving = locked && !won && !anyTriggered &&
+                (moveF || moveB || moveL || moveR);
+
+            if (locked && !won && !anyTriggered) {
+                dir.set(0, 0, 0);
+                if (moveF) dir.z -= 1;
+                if (moveB) dir.z += 1;
+                if (moveL) dir.x -= 1;
+                if (moveR) dir.x += 1;
+                dir.normalize();
+
+                const cos = Math.cos(yaw), sin = Math.sin(yaw);
+                const dx = cos * dir.x + sin * dir.z;
+                const dz = -sin * dir.x + cos * dir.z;
+
+                const nx = camera.position.x + dx * SPEED * (sprint ? 6 : 1) * dt;
+                const nz = camera.position.z + dz * SPEED * (sprint ? 6 : 1) * dt;
+
+                const PR = 0.5;
+                camera.position.x = Math.max(-(WALL_X - PR - WALL_GAP), Math.min(WALL_X - PR - WALL_GAP, nx));
+                camera.position.z = Math.max(ROAD_END + 2, Math.min(ROAD_START + 1, nz));
+
+                if (camera.position.z < ROAD_END + 10) {
+                    won = true;
+                    document.exitPointerLock();
+                    overlay.style.display = 'none';
+                    document.getElementById('faceCanvas').style.display = 'none';
+                    winEl.classList.add('active');
+                    drawStatic(0);
+                    if (proximityGain) proximityGain.gain.value = 0;
+                }
+            }
+
+            if (isMoving) {
+                bobTime += dt * BOB_FREQ * Math.PI * 2;
+            } else {
+                bobTime += dt * BOB_FREQ * Math.PI * 2;
+            }
+
+            const bobCycle = isMoving ? 1.0 : 0.0;
+            if (!('_bobAmp' in window)) window._bobAmp = 0;
+            window._bobAmp += (bobCycle - window._bobAmp) * Math.min(1, dt * 8);
+            const amp = window._bobAmp;
+
+            const bobY = Math.sin(bobTime) * BOB_AMOUNT * amp;
+            const bobX = Math.sin(bobTime * 0.5) * BOB_SWAY * amp;
+            camera.position.y = BASE_Y + bobY;
+
+            const stepSide = Math.sin(bobTime) > 0 ? 1 : -1;
+            if (amp > 0.3 && stepSide !== lastStepSide) {
+                lastStepSide = stepSide;
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                playFootstep();
+            }
+
+            if (!('_baseX' in window)) window._baseX = camera.position.x;
+            window._baseX = camera.position.x;
+            camera.position.x = Math.max(
+                -(WALL_X - 0.5 - WALL_GAP),
+                Math.min(WALL_X - 0.5 - WALL_GAP, camera.position.x + bobX * 0.3)
+            );
+
+            const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+            camera.quaternion.setFromEuler(euler);
+
+            let closestDist = Infinity;
+            let totalGaze = 0;
+
+            for (const fig of figures) {
+                if (fig.triggered) continue;
+
+                fig.mesh.lookAt(camera.position);
+                fig.mesh.rotation.x = 0;
+                fig.mesh.rotation.z = 0;
+
+                const figPos = fig.mesh.position;
+                const camPos = camera.position;
+                const toPlayer = new THREE.Vector3(camPos.x - figPos.x, 0, camPos.z - figPos.z);
+                const dist = toPlayer.length();
+
+                if (dist < closestDist) closestDist = dist;
+
+                if (!fig.active && !anyChasing) {
+                    raycaster.setFromCamera(screenCenter, camera);
+                    const hits = raycaster.intersectObject(fig.mesh);
+                    const isLooking = hits.length > 0;
+
+                    if (isLooking) {
+                        fig.gazeTicks += dt;
+                        totalGaze += fig.gazeTicks;
+                    } else {
+                        fig.gazeTicks = Math.max(0, fig.gazeTicks - dt * 0.4);
+                        totalGaze += fig.gazeTicks;
+                    }
+
+                    if (fig.gazeTicks >= GAZE_TRIGGER) {
+                        fig.active = true;
+                        fig.gazeTicks = 0;
+                    }
+                }
+
+                if (fig.active && !fig.triggered) {
+                    if (dist > 0.8) {
+                        toPlayer.normalize();
+                        figPos.x += toPlayer.x * 36 * dt;
+                        figPos.z += toPlayer.z * 36 * dt;
+                    } else {
+                        fig.triggered = true;
+                        document.exitPointerLock();
+                    }
+                }
+            }
+
+            const vigIntensity = Math.min(totalGaze / GAZE_TRIGGER, 1);
+            vigEl.style.background = `radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,${vigIntensity * 0.7}) 100%)`;
+
+            if (anyChasing && !anyTriggered) {
+                const chasingFig = figures.find(f => f.active && !f.triggered);
+                if (chasingFig) {
+                    const figDist = chasingFig.mesh.position.distanceTo(camera.position);
+                    const maxDist = 80;
+                    const chaseT = Math.max(0, Math.min(1, 1 - figDist / maxDist));
+                    drawStatic(chaseT * 0.55);
+                    bgm.volume = Math.max(0, 1 - chaseT * 1.5);
+                }
+            } else if (!anyChasing && !won) {
+                drawStatic(0);
+                bgm.volume = 1;
+                updateProximityAudio(closestDist, anyChasing);
+            } else if (anyChasing) {
+                updateProximityAudio(closestDist, anyChasing);
+            }
+
+            renderer.render(scene, camera);
+
+            if (anyTriggered && faceImg.complete && faceImg.naturalWidth > 0) {
+                const fc = document.getElementById('faceCanvas');
+                if (fc.style.display !== 'block') {
+                    fc.width = PS1_W;
+                    fc.height = PS1_H;
+                    fc.style.display = 'block';
+                    const fctx = fc.getContext('2d');
+                    fctx.drawImage(faceImg, 0, 0, PS1_W, PS1_H);
+                }
+            }
+        }
+        loop();
+    </script>
+</body>
+
+</html>
