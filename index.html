@@ -121,6 +121,25 @@
             letter-spacing: 0.25em;
             text-transform: uppercase;
             opacity: 0.5;
+            margin-bottom: 40px;
+        }
+
+        #retryBtn {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: #fff;
+            background: none;
+            border: 2px solid #fff;
+            padding: 12px 24px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        #retryBtn:hover {
+            opacity: 1;
         }
 
         #dot {
@@ -174,6 +193,7 @@
     <audio id="bgm" src="audio.mp3" loop></audio>
     <div id="win">
         <p>You made it, now what?</p>
+        <button id="retryBtn">one more time...</button>
     </div>
 
     <script type="importmap">
@@ -214,7 +234,7 @@
         scene.add(sunLight);
         scene.add(new THREE.AmbientLight(0x8899aa, 0.8));
 
-        let skyMesh, sunDisc, glowRing;
+        let skyMesh, sunDisc, glowRing, darknessOverlay;
         {
             const SKY_R = 550;
             const skyGeo = new THREE.SphereGeometry(SKY_R, 16, 10);
@@ -353,7 +373,71 @@
         const playBtn = document.getElementById('playBtn');
         const vigEl = document.getElementById('vignette');
         const winEl = document.getElementById('win');
+        const retryBtn = document.getElementById('retryBtn');
         const bgm = document.getElementById('bgm');
+
+        let cycleCount = 0;
+
+        retryBtn.addEventListener('click', () => {
+            cycleCount++;
+            won = false;
+            winEl.classList.remove('active');
+            document.getElementById('faceCanvas').style.display = 'none';
+
+            const darkness = Math.min(cycleCount * 0.1, 0.75);
+            skyMesh.material.color.setRGB(0.29 - darkness * 0.2, 0.47 - darkness * 0.25, 0.72 - darkness * 0.3);
+            scene.fog.color.setRGB(0.42 - darkness * 0.25, 0.5 - darkness * 0.25, 0.6 - darkness * 0.25);
+            sunLight.intensity = Math.max(0.25, 1.1 - cycleCount * 0.12);
+            
+            groundMat.color.setRGB(1 - darkness * 0.6, 1 - darkness * 0.55, 1 - darkness * 0.5);
+            roadMat.color.setRGB(1 - darkness * 0.5, 1 - darkness * 0.5, 1 - darkness * 0.45);
+            dashMat.color.setRGB(1 - darkness * 0.3, 1 - darkness * 0.3, 1 - darkness * 0.3);
+            
+            if (!darknessOverlay) {
+                const darkGeo = new THREE.SphereGeometry(540, 16, 8);
+                const darkMat = new THREE.MeshBasicMaterial({ 
+                    color: 0x000000, 
+                    transparent: true, 
+                    opacity: 0,
+                    side: THREE.BackSide 
+                });
+                darknessOverlay = new THREE.Mesh(darkGeo, darkMat);
+                scene.add(darknessOverlay);
+            }
+            darknessOverlay.material.opacity = darkness;
+
+            for (const fig of figures) {
+                fig.active = false;
+                fig.triggered = false;
+                fig.gazeTicks = 0;
+            }
+
+            const newZ = (ROAD_START + ROAD_END) / 2 - 20 - Math.random() * 60;
+            const newX = (Math.random() > 0.5 ? 1 : -1) * (WALL_X - 1.5 - Math.random() * 2);
+
+            loader.load('figure.png', tex => {
+                ps1Tex(tex);
+                const aspect = tex.image.width / tex.image.height;
+                const FIG_H = 4.5;
+                const figGeo = new THREE.PlaneGeometry(FIG_H * aspect, FIG_H);
+                const figMat = new THREE.MeshLambertMaterial({
+                    map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide,
+                });
+                const figureMesh = new THREE.Mesh(figGeo, figMat);
+                figureMesh.position.set(newX, FIG_H / 2, newZ);
+                scene.add(figureMesh);
+                figures.push({
+                    mesh: figureMesh,
+                    active: false,
+                    triggered: false,
+                    gazeTicks: 0
+                });
+            });
+
+            camera.position.set(0, BASE_Y, ROAD_START - 1);
+            if (proximityGain) proximityGain.gain.value = 0;
+            renderer.domElement.requestPointerLock();
+        });
 
         const faceImg = new Image();
         faceImg.src = 'figureface.png';
@@ -416,6 +500,11 @@
             if (locked) {
                 overlay.style.display = 'none';
                 renderer.domElement.style.cursor = 'none';
+            } else {
+                if (!won) {
+                    overlay.style.display = 'flex';
+                }
+                renderer.domElement.style.cursor = 'default';
             }
             if (locked && bgm.paused) bgm.play().catch(() => { });
         });
@@ -584,8 +673,8 @@
                 const dx = cos * dir.x + sin * dir.z;
                 const dz = -sin * dir.x + cos * dir.z;
 
-                const nx = camera.position.x + dx * SPEED * (sprint ? 6 : 1) * dt;
-                const nz = camera.position.z + dz * SPEED * (sprint ? 6 : 1) * dt;
+                const nx = camera.position.x + dx * SPEED * (sprint ? 12 : 1) * dt;
+                const nz = camera.position.z + dz * SPEED * (sprint ? 12 : 1) * dt;
 
                 const PR = 0.5;
                 camera.position.x = Math.max(-(WALL_X - PR - WALL_GAP), Math.min(WALL_X - PR - WALL_GAP, nx));
